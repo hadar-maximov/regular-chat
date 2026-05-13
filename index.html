@@ -883,115 +883,379 @@ body {
   /* ══════════════════════════════════════════════════════
      BIZZY BRAIN — Claude API
   ══════════════════════════════════════════════════════ */
-  const SYSTEM = `You are Bizzy, the in-app event assistant for Bizzabo.
-You answer the attendee's question naturally — warm, specific, concierge-like. Never robotic. Never over-apologise. Never a dead end.
 
-EVENT CONTEXT
-- Event: Web Summit, Expo Tel Aviv, May 12–15
-- Attendee: Julia, Product Designer at a fintech. Interests: AI, product design, sustainability.
-- Venue: Main Stage (ground floor), Hall B (Level 2 North), Auditorium A (Level 1 South), Networking Floor (Level 1 Open).
-- WiFi: SSID "EventGuest_5G", password "Summit2025!"
-- Today's sessions:
-    14:00 "Building Sustainable Cities" — Auditorium A — Maya Levine (live now)
-    14:30 "AI in Product Design" — Hall B — Daniel Wu, Figma (next)
-    16:00 "Networking Mixer" — Level 1
-    17:30 "Closing Keynote" — Main Stage — Sarah Chen
-- Notable people: Alex Chen (Senior PM, Stripe — AI, fintech, product), Priya Shah (Design Lead, Notion), Ravi Mendez (Founder, Threadwise), Dana Goldberg (Sustainability Lead, Patagonia).
-- Sponsors: Figma (Booth 12, Level 1), Stripe (Booth 7), Notion (Booth 21).
+  /* ══════════════════════════════════════════════════════
+     SCRIPTED BRAIN — no API needed
+     Matches user input to pre-written Bizzy responses.
+     Every chip has a response. Free text is matched by
+     keyword. Unknown inputs get a warm fallback.
+  ══════════════════════════════════════════════════════ */
 
-LIFECYCLE will be supplied (pre / arrival / live / post). Adapt tone accordingly.
+  // Simulated async delay so it feels like thinking
+  function bizzyDelay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-EDGE CASES — handle these explicitly:
-- "hi", "hello", "hey": Warm greeting, mention you know the event, offer 2-3 concrete starting points.
-- "help", "what can you do": Explain you can help with schedule, navigation, who to meet, WiFi — give 2-3 specific examples. Never just list categories.
-- "I don't understand", "what?", "huh": Apologise briefly, rephrase your last answer more simply, or ask what was confusing.
-- Frustration / complaints ("this is broken", "useless", "I'm lost"): Acknowledge first, then offer the most useful next step for their situation.
-- Out of scope (weather, flights, food delivery, "what's for dinner"): Brief warm acknowledgement → redirect to event value.
-- Emergency ("I feel sick", "fire", "medical", "help me", "I need a doctor"): PUT critical info (call 112, first aid Level 0 near Main Stage) DIRECTLY in body text, not behind a chip. No spinner framing. Instant.
-- Profanity / frustration language: Stay calm, acknowledge, offer help.
-- Very short input ("ok", "thanks", "cool"): Acknowledge warmly, offer a natural follow-up.
-- Repeated question: Answer again without pointing out the repetition.
+  // ── Response library ───────────────────────────────────
+  // Each entry: { match: [keywords], response: {...} }
+  // Response shape mirrors what the real Claude returned:
+  // { kind:'chat'|'cards'|'nav-prompt', text, cards, chips, intro, target }
 
-DESIGN RULES
-- Action-first. Lead with the answer. Then follow-ups.
-- Propose-then-confirm for actions with side-effects.
-- Never show a card AND repeat its content in text above it.
-- Chips must feel like the user's next thought, not a help menu.
+  const RESPONSES = [
 
-OUTPUT — RETURN ONE JSON OBJECT, NO MARKDOWN, NO PROSE OUTSIDE THE JSON
+    // ── GREETINGS ────────────────────────────────────────
+    { match: ['hi','hello','hey','sup','yo','shalom'],
+      response: { kind:'chat',
+        text: "Hey Julia! You're at Web Summit — I've got the full schedule, all the speakers, and I know who's worth meeting based on your interests. What can I help with?",
+        chips: ["Who should I meet?", "What's on now?", "WiFi password?"] }},
 
-Pick the right "kind":
+    // ── HELP / CAPABILITIES ──────────────────────────────
+    { match: ['help','what can you do','what do you know','capabilities','how does this work'],
+      response: { kind:'chat',
+        text: "I know everything about this event — sessions, speakers, venue, WiFi, who to meet. Try asking me something specific like \"who's speaking on AI?\" or \"how do I get to Hall B?\" — that's where I'm most useful.",
+        chips: ["Who's speaking on AI?", "How do I get to Hall B?", "Who should I meet?"] }},
 
-1. "cards" — entities (people, sessions, speakers, sponsors, places, wifi, schedule)
-{"kind":"cards","intro":"<optional one sentence>","cards":[<1-4 card objects>],"chips":["<follow-up 1>","<follow-up 2>","<follow-up 3>"]}
+    // ── WHO SHOULD I MEET ────────────────────────────────
+    { match: ['who should i meet','who to meet','suggest people','find people','recommend people','networking','meet someone'],
+      response: { kind:'cards',
+        intro: "Given your background in product design, AI, and fintech, these three are worth finding today.",
+        cards: [
+          { type:'person', name:'Alex Chen', role:'Senior PM', company:'Stripe', photoSeed:33, mutuals:['AI','fintech','product'], availability:'Free at 15:30' },
+          { type:'person', name:'Priya Shah', role:'Design Lead', company:'Notion', photoSeed:22, mutuals:['product design','AI'], availability:'At Notion Booth 21' },
+          { type:'person', name:'Dana Goldberg', role:'Sustainability Lead', company:'Patagonia', photoSeed:48, mutuals:['sustainability'], availability:'Likely at 16:00 Mixer' },
+        ],
+        chips: ["Message Alex Chen", "Find Notion Booth 21", "16:00 Mixer details"] }},
 
-Card types:
-- speaker: {"type":"speaker","name":"Daniel Wu","title":"Principal Designer","company":"Figma","photoSeed":12,"mutuals":["AI","product design"],"session":"AI in Product Design","sessionTime":"14:30 · Hall B"}
-- session: {"type":"session","title":"AI in Product Design","time":"14:30","room":"Hall B","speaker":"Daniel Wu","photoSeed":12,"tag":"next","inAgenda":false}
-- person: {"type":"person","name":"Alex Chen","role":"Senior PM","company":"Stripe","photoSeed":33,"mutuals":["AI","fintech","product"],"availability":"Free at 15:30"}
-- place: {"type":"place","name":"Hall B","level":"Level 2 North","walkMin":4,"mapHint":"Take the east escalator past Main Stage"}
-- wifi: {"type":"wifi","ssid":"EventGuest_5G","password":"Summit2025!"}
-- sponsor: {"type":"sponsor","name":"Figma","booth":"Booth 12, Level 1","hook":"Live demo of Dev Mode every 30 min","ctaLabel":"See booth"}
-- schedule: {"type":"schedule","items":[{"time":"14:30","title":"AI in Product Design","meta":"Hall B · Daniel Wu","tag":"next"}]}
+    // ── WHAT'S ON NOW ────────────────────────────────────
+    { match: ["what's on now","whats on now","what is on now","happening now","live now","right now","current session","what's happening"],
+      response: { kind:'cards',
+        intro: "One session live right now, and your next one starts in 23 minutes.",
+        cards: [
+          { type:'session', title:'Building Sustainable Cities', time:'14:00', room:'Auditorium A', speaker:'Maya Levine', tag:'live', inAgenda:false },
+          { type:'session', title:'AI in Product Design', time:'14:30', room:'Hall B', speaker:'Daniel Wu', tag:'next', inAgenda:true },
+        ],
+        chips: ["Navigate to Hall B", "Add to my agenda", "What's after that?"] }},
 
-2. "nav-prompt" — user wants a full page (full speaker list, open agenda, etc.)
-{"kind":"nav-prompt","text":"<short framing>","target":"speakers"|"agenda"|"network"|"schedule"|"more","chips":["Yes, open it","No, just summarise"]}
+    // ── NEXT SESSION / UP NEXT ───────────────────────────
+    { match: ["what's next","whats next","next session","next up","up next","my next"],
+      response: { kind:'cards',
+        intro: "Your next session is in 23 minutes — you have time to grab a coffee first.",
+        cards: [
+          { type:'session', title:'AI in Product Design', time:'14:30', room:'Hall B', speaker:'Daniel Wu', tag:'next', inAgenda:true },
+        ],
+        chips: ["Navigate to Hall B", "Who is Daniel Wu?", "What's after that?"] }},
 
-3. "chat" — no entity to render (greetings, help, small talk, edge cases, emergencies)
-{"kind":"chat","text":"<2-4 sentences, natural, specific, warm>","chips":["<follow-up 1>","<follow-up 2>","<follow-up 3>"]}
+    // ── SCHEDULE / AGENDA ────────────────────────────────
+    { match: ['schedule','agenda','full schedule','today','lineup','programme','program','sessions today','what sessions'],
+      response: { kind:'cards',
+        intro: "Here's the rest of today. You have AI in Product Design saved — the Mixer and Keynote are worth adding.",
+        cards: [{ type:'schedule', items:[
+          { time:'14:00', title:'Building Sustainable Cities', meta:'Auditorium A · Maya Levine', tag:'live' },
+          { time:'14:30', title:'AI in Product Design', meta:'Hall B · Daniel Wu', tag:'next' },
+          { time:'16:00', title:'Networking Mixer', meta:'Level 1 · Open floor' },
+          { time:'17:30', title:'Closing Keynote', meta:'Main Stage · Sarah Chen' },
+        ]}],
+        chips: ["Add Mixer to agenda", "Who is Sarah Chen?", "Any sessions on sustainability?"] }},
 
-RULES on chips: Always 2-4. Each ≤ 28 chars. Action verbs. Feel like the user's next thought.
-RULES on text: Specific. Real names, rooms, times. Never "I don't know" alone. No corporate filler.
+    // ── AI SESSIONS ──────────────────────────────────────
+    { match: ['ai session','sessions on ai','artificial intelligence','machine learning','ai talk','ai speaker'],
+      response: { kind:'cards',
+        intro: "Two sessions today that are directly relevant to your work.",
+        cards: [
+          { type:'session', title:'AI in Product Design', time:'14:30', room:'Hall B', speaker:'Daniel Wu', tag:'next', inAgenda:true },
+          { type:'session', title:'Closing Keynote', time:'17:30', room:'Main Stage', speaker:'Sarah Chen', tag:null, inAgenda:false },
+        ],
+        chips: ["Tell me about Daniel Wu", "Add Keynote to agenda", "Navigate to Hall B"] }},
 
-Return ONLY the JSON object. No code fences. No commentary.`;
+    // ── SUSTAINABILITY SESSIONS ──────────────────────────
+    { match: ['sustainability','climate','green','sustainable','environment'],
+      response: { kind:'cards',
+        intro: "One session on sustainability right now — and Dana Goldberg from Patagonia is worth meeting.",
+        cards: [
+          { type:'session', title:'Building Sustainable Cities', time:'14:00', room:'Auditorium A', speaker:'Maya Levine', tag:'live', inAgenda:false },
+          { type:'person', name:'Dana Goldberg', role:'Sustainability Lead', company:'Patagonia', photoSeed:48, mutuals:['sustainability','design','climate'], availability:'Likely at 16:00 Mixer' },
+        ],
+        chips: ["Add session to agenda", "Message Dana", "16:00 Mixer details"] }},
 
-  function safeParse(raw) {
-    const cleaned = String(raw).replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/i,'').trim();
-    try { return JSON.parse(cleaned); } catch(e) {
-      const m = cleaned.match(/\{[\s\S]*\}$/);
-      if (m) { try { return JSON.parse(m[0]); } catch(_){} }
-      return null;
+    // ── DANIEL WU ────────────────────────────────────────
+    { match: ['daniel wu','daniel','figma speaker','figma talk'],
+      response: { kind:'cards',
+        intro: "Daniel Wu is Principal Designer at Figma — he co-created Dev Mode and is now building Figma AI.",
+        cards: [
+          { type:'speaker', name:'Daniel Wu', title:'Principal Designer', company:'Figma', photoSeed:12, mutuals:['AI','product design'], session:'AI in Product Design', sessionTime:'14:30 · Hall B' },
+        ],
+        chips: ["View full profile", "Navigate to Hall B", "Add session to agenda"] }},
+
+    // ── SARAH CHEN ───────────────────────────────────────
+    { match: ['sarah chen','sarah','closing keynote speaker','keynote speaker','threadwise'],
+      response: { kind:'cards',
+        intro: "Sarah Chen closes the event at 17:30. She founded Threadwise and previously was CPO at Linear — 94k followers.",
+        cards: [
+          { type:'speaker', name:'Sarah Chen', title:'CEO', company:'Threadwise', photoSeed:60, mutuals:['AI','product design','fintech'], session:'Closing Keynote', sessionTime:'17:30 · Main Stage' },
+        ],
+        chips: ["View full profile", "Add Keynote to agenda", "Navigate to Main Stage"] }},
+
+    // ── ALEX CHEN ────────────────────────────────────────
+    { match: ['alex chen','alex','stripe pm','meet alex'],
+      response: { kind:'cards',
+        intro: "Alex leads product for Stripe Checkout. He's free at 15:30 — that's your best window.",
+        cards: [
+          { type:'person', name:'Alex Chen', role:'Senior PM', company:'Stripe', photoSeed:33, mutuals:['AI','fintech','product'], availability:'Free at 15:30' },
+        ],
+        chips: ["Request meeting", "View full profile", "Find Stripe booth"] }},
+
+    // ── PRIYA SHAH ───────────────────────────────────────
+    { match: ['priya shah','priya','notion design','design lead notion'],
+      response: { kind:'cards',
+        intro: "Priya leads design systems at Notion. She's at their booth right now — Booth 21, Level 1.",
+        cards: [
+          { type:'person', name:'Priya Shah', role:'Design Lead', company:'Notion', photoSeed:22, mutuals:['product design','AI'], availability:'At Notion Booth 21' },
+        ],
+        chips: ["Find Notion Booth 21", "Request meeting", "View full profile"] }},
+
+    // ── DANA GOLDBERG ────────────────────────────────────
+    { match: ['dana goldberg','dana','patagonia'],
+      response: { kind:'cards',
+        intro: "Dana is at the sustainable cities session right now, then likely at the 16:00 Mixer.",
+        cards: [
+          { type:'person', name:'Dana Goldberg', role:'Sustainability Lead', company:'Patagonia', photoSeed:48, mutuals:['sustainability','design','climate'], availability:'In Auditorium A now' },
+        ],
+        chips: ["Request meeting", "16:00 Mixer details", "View full profile"] }},
+
+    // ── HALL B / NAVIGATION ──────────────────────────────
+    { match: ['hall b','navigate','directions','how do i get','where is','find the','get to','location','venue','map'],
+      response: { kind:'cards',
+        intro: "Hall B is Level 2 North — take the east escalator past Main Stage, it's about a 4-minute walk.",
+        cards: [
+          { type:'place', name:'Hall B', level:'Level 2 North', walkMin:4, mapHint:'East escalator from Main Stage lobby' },
+        ],
+        chips: ["Navigate to Main Stage", "Where is Auditorium A?", "Find Notion Booth 21"] }},
+
+    // ── AUDITORIUM A ─────────────────────────────────────
+    { match: ['auditorium a','auditorium'],
+      response: { kind:'cards',
+        intro: "Auditorium A is Level 1 South — head down from Main Stage and follow the signs.",
+        cards: [
+          { type:'place', name:'Auditorium A', level:'Level 1 South', walkMin:3, mapHint:'Down from Main Stage, follow yellow signs' },
+        ],
+        chips: ["Navigate to Hall B", "Where is Main Stage?", "Full schedule"] }},
+
+    // ── MAIN STAGE ───────────────────────────────────────
+    { match: ['main stage','mainstage'],
+      response: { kind:'cards',
+        intro: "Main Stage is on the ground floor — it's the largest space, hard to miss.",
+        cards: [
+          { type:'place', name:'Main Stage', level:'Ground floor', walkMin:2, mapHint:'Central hall, follow the crowd' },
+        ],
+        chips: ["Closing Keynote details", "Navigate to Hall B", "Full schedule"] }},
+
+    // ── WIFI ─────────────────────────────────────────────
+    { match: ['wifi','wi-fi','password','internet','network','ssid','connect'],
+      response: { kind:'cards',
+        intro: "Here you go.",
+        cards: [{ type:'wifi', ssid:'EventGuest_5G', password:'Summit2025!' }],
+        chips: ["Copy password", "Anything else?", "Full schedule"] }},
+
+    // ── FIGMA BOOTH ──────────────────────────────────────
+    { match: ['figma booth','figma sponsor','figma stand'],
+      response: { kind:'cards',
+        intro: "Figma are running live Dev Mode demos every 30 minutes at their booth.",
+        cards: [
+          { type:'sponsor', name:'Figma', booth:'Booth 12, Level 1', hook:'Live Dev Mode demos every 30 min', ctaLabel:'See booth' },
+        ],
+        chips: ["Navigate to Booth 12", "Meet Daniel Wu", "Other sponsors"] }},
+
+    // ── STRIPE BOOTH ─────────────────────────────────────
+    { match: ['stripe booth','stripe sponsor','stripe stand'],
+      response: { kind:'cards',
+        intro: "Stripe are at Booth 7 — Alex Chen mentioned they're actively hiring designers there.",
+        cards: [
+          { type:'sponsor', name:'Stripe', booth:'Booth 7, Level 1', hook:'Hiring designers — talk to Alex', ctaLabel:'See booth' },
+        ],
+        chips: ["Meet Alex Chen", "Navigate to Booth 7", "Other sponsors"] }},
+
+    // ── NOTION BOOTH ─────────────────────────────────────
+    { match: ['notion booth','notion sponsor','booth 21','find notion'],
+      response: { kind:'cards',
+        intro: "Notion are at Booth 21 — Priya Shah from their design team is there right now.",
+        cards: [
+          { type:'sponsor', name:'Notion', booth:'Booth 21, Level 1', hook:'Priya Shah (Design Lead) is here now', ctaLabel:'See booth' },
+        ],
+        chips: ["Meet Priya Shah", "Navigate to Booth 21", "Other sponsors"] }},
+
+    // ── SPONSORS ─────────────────────────────────────────
+    { match: ['sponsors','booths','exhibitors','vendor','exhibit'],
+      response: { kind:'cards',
+        intro: "Three sponsors worth your time today — all on Level 1.",
+        cards: [
+          { type:'sponsor', name:'Figma', booth:'Booth 12, Level 1', hook:'Live Dev Mode demos every 30 min', ctaLabel:'See booth' },
+          { type:'sponsor', name:'Stripe', booth:'Booth 7, Level 1', hook:'Hiring designers — talk to Alex', ctaLabel:'See booth' },
+          { type:'sponsor', name:'Notion', booth:'Booth 21, Level 1', hook:'Priya Shah is there now', ctaLabel:'See booth' },
+        ],
+        chips: ["Navigate to Level 1", "Meet Alex Chen", "Meet Priya Shah"] }},
+
+    // ── MIXER / NETWORKING EVENT ─────────────────────────
+    { match: ['mixer','networking event','16:00','4pm','networking mixer','drop-in'],
+      response: { kind:'chat',
+        text: "The Networking Mixer runs 16:00–17:30 on Level 1 Open Floor. Topic tables by interest — there's an AI table, a Design Systems corner, and a Climate section. Drinks are on. It's the easiest way to meet people without it feeling forced.",
+        chips: ["Add Mixer to agenda", "Who's likely there?", "Navigate to Level 1"] }},
+
+    // ── CLOSING KEYNOTE ──────────────────────────────────
+    { match: ['closing keynote','keynote','17:30','sarah chen keynote'],
+      response: { kind:'cards',
+        intro: "Closing keynote at 17:30 on the Main Stage. Sarah Chen on the future of AI-augmented teams — worth staying for.",
+        cards: [
+          { type:'session', title:'Closing Keynote', time:'17:30', room:'Main Stage', speaker:'Sarah Chen', tag:null, inAgenda:false },
+        ],
+        chips: ["Add to agenda", "Who is Sarah Chen?", "Navigate to Main Stage"] }},
+
+    // ── REQUEST MEETING ──────────────────────────────────
+    { match: ['request meeting','schedule meeting','meet with','set up a meeting','book a meeting'],
+      response: { kind:'chat',
+        text: "To request a meeting, I'd send them a message through the app. Want me to draft one? Just tell me who it's for.",
+        chips: ["Message Alex Chen", "Message Priya Shah", "Message Dana Goldberg"] }},
+
+    // ── MESSAGE ALEX ─────────────────────────────────────
+    { match: ['message alex','contact alex','reach alex','dm alex'],
+      response: { kind:'chat',
+        text: "Here's a draft: \"Hi Alex — I'm Julia, product designer at a fintech. Your work on Stripe Checkout UX is directly relevant to what we're building. Are you free at 15:30 for a quick chat?\" Send it?",
+        chips: ["Yes, send it", "Edit the message", "Find him first"] }},
+
+    // ── ADD TO AGENDA ────────────────────────────────────
+    { match: ['add to agenda','save session','add session','save to agenda'],
+      response: { kind:'chat',
+        text: "Done — AI in Product Design at 14:30 is saved to your agenda. I'll remind you 10 minutes before.",
+        chips: ["Show my agenda", "Navigate to Hall B", "What's after that?"] }},
+
+    // ── SHOW AGENDA ──────────────────────────────────────
+    { match: ['show my agenda','my agenda','show agenda','what have i saved','saved sessions'],
+      response: { kind:'cards',
+        intro: "You have one session saved. Plenty of room to add more.",
+        cards: [{ type:'schedule', items:[
+          { time:'14:30', title:'AI in Product Design', meta:'Hall B · Daniel Wu — Saved', tag:'next' },
+        ]}],
+        chips: ["Add Mixer to agenda", "Add Keynote to agenda", "Full schedule"] }},
+
+    // ── WHAT'S AFTER ─────────────────────────────────────
+    { match: ["what's after","whats after","after that","next after","then what","what follows"],
+      response: { kind:'cards',
+        intro: "After AI in Product Design, there's the Networking Mixer at 16:00 — then the Closing Keynote at 17:30.",
+        cards: [
+          { type:'session', title:'Networking Mixer', time:'16:00', room:'Level 1 · Open floor', tag:null, inAgenda:false },
+          { type:'session', title:'Closing Keynote', time:'17:30', room:'Main Stage', speaker:'Sarah Chen', tag:null, inAgenda:false },
+        ],
+        chips: ["Add both to agenda", "Who is Sarah Chen?", "Navigate to Level 1"] }},
+
+    // ── FREE TIME ────────────────────────────────────────
+    { match: ['free time','break','gap','lunch','coffee','eat','food','grab a bite'],
+      response: { kind:'chat',
+        text: "You've got about 20 minutes before AI in Product Design. The café on Level 0 is quick, or grab something from the food trucks outside the east entrance. The Figma booth is also worth a stop — they're doing live demos right now.",
+        chips: ["Navigate to Figma booth", "Navigate to Hall B", "Full schedule"] }},
+
+    // ── FULL SPEAKER LIST ────────────────────────────────
+    { match: ['all speakers','full speaker list','speaker list','who is speaking','speakers'],
+      response: { kind:'nav-prompt',
+        text: "There are 12 speakers across today's sessions. Want to browse the full list?",
+        target: 'agenda',
+        chips: ['Yes, open it', 'No, just summarise'] }},
+
+    // ── FULL ATTENDEE LIST ───────────────────────────────
+    { match: ['all attendees','full list','browse people','everyone here','attendee list'],
+      response: { kind:'nav-prompt',
+        text: "There are 340 attendees registered for today. Want to browse the full network?",
+        target: 'network',
+        chips: ['Yes, open it', 'No, just show top matches'] }},
+
+    // ── YES / CONFIRM ────────────────────────────────────
+    { match: ['yes','sure','ok','okay','go ahead','send it','confirm','sounds good','perfect','great','do it'],
+      response: { kind:'chat',
+        text: "Done. Anything else I can help with?",
+        chips: ["Show my agenda", "Who should I meet?", "What's on now?"] }},
+
+    // ── THANKS ───────────────────────────────────────────
+    { match: ['thanks','thank you','cheers','thx','ty','appreciate it','great thanks'],
+      response: { kind:'chat',
+        text: "Of course. Enjoy AI in Product Design — it starts in about 20 minutes.",
+        chips: ["Navigate to Hall B", "Who should I meet?", "Full schedule"] }},
+
+    // ── FRUSTRATION ──────────────────────────────────────
+    { match: ["doesn't work","not working","broken","useless","terrible","awful","hate this","confused","lost","stuck"],
+      response: { kind:'chat',
+        text: "Sorry about that — let me help you get back on track. What's the most important thing you need right now?",
+        chips: ["Show my agenda", "Navigate somewhere", "Who should I meet?"] }},
+
+    // ── I DON'T UNDERSTAND ──────────────────────────────
+    { match: ["don't understand","dont understand","what?","huh","unclear","what do you mean","explain","i'm confused"],
+      response: { kind:'chat',
+        text: "Let me simplify — I'm your event guide. Ask me things like \"where is Hall B\", \"who should I meet\", or \"what's on right now\" and I'll give you a direct answer.",
+        chips: ["What's on right now?", "Who should I meet?", "WiFi password?"] }},
+
+    // ── EMERGENCY ────────────────────────────────────────
+    { match: ['emergency','help me','fire','evacuate','medical','doctor','sick','hurt','accident','first aid'],
+      response: { kind:'chat',
+        text: "Emergency services: call 112 immediately. First aid station is at Level 0, near the Main Stage entrance — look for the green cross sign. Security desk is at the main entrance, ground floor.",
+        chips: ["Call 112", "Navigate to First Aid", "Find security desk"] }},
+
+    // ── OUT OF SCOPE ─────────────────────────────────────
+    { match: ['weather','flight','hotel','taxi','uber','food delivery','restaurant','outside','city','tel aviv','tourism'],
+      response: { kind:'chat',
+        text: "That's a bit outside my world — I only know what's happening inside Web Summit. Want me to help with something here instead?",
+        chips: ["What's on now?", "Who should I meet?", "WiFi password?"] }},
+  ];
+
+  // ── Matcher ────────────────────────────────────────────
+  function matchResponse(query) {
+    const q = query.toLowerCase().trim();
+
+    // Exact or substring match
+    for (const entry of RESPONSES) {
+      for (const keyword of entry.match) {
+        if (q === keyword || q.includes(keyword)) {
+          return entry.response;
+        }
+      }
     }
+
+    // Fuzzy: check if any word in the query matches any keyword
+    const words = q.split(/\s+/);
+    for (const entry of RESPONSES) {
+      for (const keyword of entry.match) {
+        const kwWords = keyword.split(/\s+/);
+        if (kwWords.some(kw => words.some(w => w.length > 3 && w.includes(kw)))) {
+          return entry.response;
+        }
+      }
+    }
+
+    return null;
   }
 
-  function normalize(obj) {
-    if (!obj || !obj.kind) return null;
-    if (!['chat','cards','nav-prompt','plain','error'].includes(obj.kind)) return null;
-    obj.chips = Array.isArray(obj.chips) ? obj.chips.slice(0,4) : [];
-    if (obj.kind==='cards' && !Array.isArray(obj.cards)) obj.cards = [];
-    return obj;
-  }
+  // ── Fallback responses (rotate so it doesn't feel robotic) ─
+  const FALLBACKS = [
+    { kind:'chat',
+      text: "I'm not sure I caught that — try asking about the schedule, who to meet, or how to get somewhere.",
+      chips: ["What's on now?", "Who should I meet?", "WiFi password?"] },
+    { kind:'chat',
+      text: "Hmm, can you rephrase that? I'm best with specific things like names, sessions, or places.",
+      chips: ["Show full schedule", "Find someone to meet", "Navigate somewhere"] },
+    { kind:'chat',
+      text: "Not quite sure what you mean — but I can help with sessions, people, navigation, or venue info.",
+      chips: ["What's on now?", "Who should I meet?", "Hall B directions"] },
+  ];
+  let fallbackIdx = 0;
 
-  async function askClaude(query, ctx) {
-    const lifecycle = (ctx&&ctx.lifecycle)||'live';
-    const page = (ctx&&ctx.page)||'home';
-    const history = (ctx&&ctx.history)||[];
-    const histTxt = history.length
-      ? '\n\nRECENT CONVERSATION:\n'+history.slice(-6).map(h=>`${h.role==='user'?'Julia':'Bizzy'}: ${h.text}`).join('\n')
-      : '';
-    const userMsg = `Lifecycle: ${lifecycle}\nUser is on page: ${page}${histTxt}\n\nUser asks: ${query}\n\nReturn JSON.`;
+  // ── Main function (replaces askClaude) ─────────────────
+  async function askClaude(query) {
+    // Realistic delay: fast for simple lookups, slightly longer for complex
+    const q = query.toLowerCase();
+    const isSimple = ['wifi','password','hello','hi','hey','thanks'].some(w => q.includes(w));
+    await bizzyDelay(isSimple ? 400 : 900 + Math.random() * 400);
 
-    try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          system: SYSTEM,
-          messages: [{ role: 'user', content: userMsg }],
-        }),
-      });
-      const data = await res.json();
-      const raw = data.content && data.content[0] && data.content[0].text;
-      if (!raw) throw new Error('empty response');
-      const parsed = normalize(safeParse(raw));
-      if (!parsed) throw new Error('parse failed: '+raw);
-      return parsed;
-    } catch(e) {
-      console.warn('[Bizzy]', e);
-      return { kind:'error', text:"Couldn't reach my brain just now — try again in a moment.", chips:['Try again','Ask something else'] };
-    }
+    const response = matchResponse(query);
+    if (response) return response;
+
+    // Rotate fallbacks
+    const fb = FALLBACKS[fallbackIdx % FALLBACKS.length];
+    fallbackIdx++;
+    return fb;
   }
 
   /* ══════════════════════════════════════════════════════
